@@ -2,7 +2,7 @@ TST =$(TGT).t
 DEBUG =-g
 GTEST =../../googletest/googletest
 CXXFLAGS =-Wall -std=c++11 -I. $(DEBUG)
-TESTLIBS =-lgtest -lpthread
+TESTLIBS =-L/usr/local/lib -lgtest -lpthread
 OBJS =$(patsubst %.cc,.obj/%.o,$(wildcard *.cc))
 CXX=clang++
 LD=clang++
@@ -10,6 +10,8 @@ LD=clang++
 $(TGT): $(OBJS)
 
 test/$(TST): test/.obj/$(TST).o .obj/$(TGT).o 
+	@echo "(LD) $@"
+	@pwd
 	$(LD) $^ $(TESTLIBS) -o $@
 
 .obj/main.o: main.cc $(TGT).h

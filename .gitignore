@@ -30,3 +30,6 @@
 *.exe
 *.out
 *.app
+
+mock_rest_api
+htdocs
