@@ -21,4 +21,7 @@ extern const int LOG;
 void logger(int type, const std::string& s1, const std::string& s2, int
             socket_fd);
 void web(int fd, int hit);
+
+bool init_rest_data(const std::string& json_file);
+
 #endif

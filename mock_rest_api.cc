@@ -39,7 +39,7 @@ const std::array<Extension, 10> extensions = { {
 const std::array<std::string, 9> BAD_DIRS = {
    { "/", "/bin", "/etc", "lib", "/tmp", "/usr", "/var", "/opt", "/proc" } };
 
-std::map<std::string, std::string> test_data;
+std::map<std::string, std::string> rest_data;
 
 void logger(int type, const std::string& s1, const std::string& s2, int
 socket_fd) {
@@ -171,16 +171,35 @@ void handle_get(char* buffer, std::map<const char*, std::string>& header,
    }
    logger(LOG, "Extension", fext, fd);
    if (fext.empty()) {
-     const auto& content_type = header["Content-Type"];
-     if (content_type == "application/json") {
-       std::string path{buffer, buflen};
-       const auto& td = test_data.find(path);
-       if (td == test_data.end()) {
+     std::string path{&buffer[4], strlen(&buffer[4])};
+     const auto& td = rest_data.find(path);
+     if (td == rest_data.end()) {
+       logger(NOTFOUND, "path not found", &buffer[5], fd);
+     }
+     else {
+       std::ifstream file;
+       file.open(rest_data[path]);
+       if (!file) {  /* open the file for reading */
          logger(NOTFOUND, "failed to open file", &buffer[5], fd);
        }
-       else {
-
+       file.seekg(0, std::ios::end);
+       std::streampos fsize = file.tellg();
+       file.seekg(0, std::ios::beg);
+       logger(LOG, "Send", &buffer[5], 0);
+       std::ostringstream log;
+       log << "HTTP/1.1 200 OK\nServer: mock_rest_api/" << VERSION << ".0\n"
+           << "Content-Length: " << fsize << "\n"
+           << "Connection: close\nContent-Type: " << fext << "\n\n";
+       logger(HEADER, "Resoponse Header", log.str(), hit);
+       write(fd, log.str().c_str(), log.str().size());
+       
+       /* send file in 8KB block - last block may be smaller */
+       while (!file.eof()) {
+         int ret = file.readsome(buffer, BUFSIZE);
+         write(fd, buffer, ret);
        }
+       sleep(1); /* allow socket to drain before closing */
+       close(fd);
      }
    }
    else {
@@ -205,7 +224,7 @@ void handle_get(char* buffer, std::map<const char*, std::string>& header,
        int ret = file.readsome(buffer, BUFSIZE);
        write(fd, buffer, ret);
      }
-     sleep(1); /* allow socket to drain before signalling the socket is closed */
+     sleep(1); /* allow socket to drain before closing */
      close(fd);
    }
 }
@@ -274,19 +293,38 @@ void web(int fd, int hit) {
    exit(1);
 }
 
-bool init_test_data(std::string& json_file) {
+bool init_rest_data(const std::string& json_file) {
    boost::property_tree::ptree ptree;
    std::ifstream ifs(json_file);
-   boost::property_tree::read_json(ifs, ptree);
-   for (auto& field: ptree) {
-     //const std::string& field_name = field.first;
-     for (auto& info: field.second) {
-       const std::string& type = info.first;
-       if (type == "value" || type == "values") {
+   if (ifs) {
+     try {
+       boost::property_tree::read_json(ifs, ptree);
+     }
+     catch (std::exception ex) {
+       std::cerr << ex.what() << std::endl;
+       exit(-1);
+     }
+   }
+   else {
+     std::cerr << json_file << " not found." << std::endl;
+     exit(-1);
+   }
+   const auto& requests = ptree.get_child("requests");
+   for (auto& field: requests) {
+     const auto& path = field.second.get_optional<std::string>("path");
+     const auto& response = field.second.get_optional<std::string>("response");
+     if (path && response) {
+       std::cout << "path=" << *path << " | response=" << *response << std::endl;
+       if (rest_data.find(*response) == rest_data.end()) {
+         rest_data[*path] = *response;
+       }
+       else {
+         std::cerr << "Duplicate path '" << *path << "' found in "
+                   << json_file << std::endl;
+         exit(-3);
        }
      }
    }
    ifs.close();
    return true;
 }
-

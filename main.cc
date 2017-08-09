@@ -48,6 +48,10 @@ int main(int argc, char **argv) {
      std::cout << "ERROR: Can't Change to directory " << argv[2] << std::endl;
      exit(4);
    }
+   if (!init_rest_data("rest_data.json")) {
+     std::cout << "ERROR: Can't load test data from rest_data.json " << std::endl;
+     exit(5);
+   }
    /* Become deamon + unstopable and no zombies children ( = no wait()) */
    if (fork() != 0)
      return 0; /* parent returns OK to shell */
