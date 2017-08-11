@@ -6,6 +6,7 @@ TESTLIBS =-L/usr/local/lib -lgtest -lpthread
 OBJS =$(patsubst %.cc,.obj/%.o,$(wildcard *.cc))
 CXX=clang++
 LD=clang++
+LDLIBS=-L/usr/local/lib -lboost_program_options
 
 $(TGT): $(OBJS)
 

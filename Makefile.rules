@@ -3,14 +3,14 @@
 
 %.o: %.cc
 
-.obj/%.o: %.cc .obj
+.obj/%.o: %.cc
 	@echo "(CC) $@"
 	@$(COMPILE.cc) $(OUTPUT_OPTION) $<
 
-test/.obj/%.o: test/%.cc .obj
+test/.obj/%.o: test/%.cc
 	@echo "(CC) $@"
 	@$(COMPILE.cc) $(OUTPUT_OPTION) $<
 
-%: .obj/%.o
+%: .obj/%.o .obj
 	@@echo "(LD) $@"
-	@$(LD) $^ -o $@
+	@$(LD) $(LDLIBS) $(OBJS) -o $@
