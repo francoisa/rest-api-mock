@@ -6,11 +6,11 @@ TESTLIBS =-L/usr/local/lib -lgtest -lpthread
 OBJS =$(patsubst %.cc,.obj/%.o,$(wildcard *.cc))
 CXX=clang++
 LD=clang++
-LDLIBS=-L/usr/local/lib -lboost_program_options
+LDLIBS=-L/usr/local/lib -lboost_program_options -lpthread
 
 $(TGT): $(OBJS)
 
-test/$(TST): test/.obj/$(TST).o .obj/$(TGT).o 
+test/$(TST): test/.obj/$(TST).o .obj/$(TGT).o
 	@echo "(LD) $@"
 	@pwd
 	$(LD) $^ $(TESTLIBS) -o $@
