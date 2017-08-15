@@ -9,6 +9,8 @@
 #include <iostream>
 #include <sstream>
 #include <map>
+#include <memory>
+#include <future>
 
 #include <boost/algorithm/string.hpp>
 #include <boost/lexical_cast.hpp>
@@ -39,11 +41,12 @@ const std::array<Extension, 10> extensions = { {
 const std::array<std::string, 9> BAD_DIRS = {
    { "/", "/bin", "/etc", "lib", "/tmp", "/usr", "/var", "/opt", "/proc" } };
 
-void *ThreadMain(void *arg); // Main program of a thread
-
 // Structure of arguments to pass to client thread
 struct ThreadArgs {
-    int clntSock; // Socket descriptor for client
+  ThreadArgs() = default;
+  ThreadArgs(const ThreadArgs& ta) = default;
+  int clntSock; // Socket descriptor for client
+  int hit;
 };
 
 std::map<std::string, std::string> rest_data;
@@ -269,7 +272,7 @@ void handle_post(char* buffer, const std::map<const char*, std::string>& header,
 }
 
 /* this is a child web server process, so we can exit on errors */
-void web(int fd, int hit) {
+void web_(int fd, int hit) {
    long ret;
    static char buffer[BUFSIZE+1]; /* static so zero filled */
 
@@ -300,56 +303,57 @@ void web(int fd, int hit) {
    exit(1);
 }
 
-void *ThreadMain(void *threadArgs) {
-    static int hit;
-    // Guarantees that thread resources are deallocated upon return
-    pthread_detach(pthread_self());
-
+struct ThreadMain {
+private:
+  std::shared_ptr<ThreadArgs> threadArgs;
+public:
+  ThreadMain(const std::shared_ptr<ThreadArgs>& ta) : threadArgs(ta) {}
+  
+  bool main() {
+    static int hit = threadArgs->hit;
+    
     // Extract socket file descriptor from argument
-    int fd = ((struct ThreadArgs *) threadArgs)->clntSock;
-    free(threadArgs); // Deallocate memory for argument
-
+    int fd = threadArgs->clntSock;
+    
     long ret;
     static char buffer[BUFSIZE+1]; /* static so zero filled */
-
+    
     ret = read(fd, buffer, BUFSIZE); /* read Web request in one go */
     if (ret == 0 || ret == -1) { /* read failure stop now */
-        logger(FORBIDDEN, "failed to read browser request", "", fd);
+      logger(FORBIDDEN, "failed to read browser request", "", fd);
     }
     if (ret > 0 && ret < BUFSIZE) { /* return code is valid chars */
-        buffer[ret] = 0; /* terminate the buffer */
+      buffer[ret] = 0; /* terminate the buffer */
     }
     else {
-        buffer[0] = 0;
+      buffer[0] = 0;
     }
     logger(HEADER, "Request + Header", buffer, hit++);
     Method method = parse_method(buffer, fd);
     std::map<const char*, std::string> header;
     parse_headers(buffer, header);
     switch (method) {
-      case Method::GET:
-        handle_get(buffer, header, fd, hit);
-        break;
-      case Method::POST:
-        handle_post(buffer, header, fd, hit);
-        break;
-      default:
-        logger(LOG, "Method", buffer, fd);
+    case Method::GET:
+      handle_get(buffer, header, fd, hit);
+      break;
+    case Method::POST:
+      handle_post(buffer, header, fd, hit);
+      break;
+    default:
+      logger(LOG, "Method", buffer, fd);
     }
+    
+    return true;
+  }
+};
 
-    return (NULL);
-}
-
-void PrintSocketAddress(const struct sockaddr *address, FILE *stream) {
-  // Test for address and stream
-  if (address == NULL || stream == NULL)
-    return;
-
+void PrintSocketAddress(const struct sockaddr *address) {
   void *numericAddress; // Pointer to binary address
   // Buffer to contain result (IPv6 sufficient to hold IPv4)
   char addrBuffer[INET6_ADDRSTRLEN];
   in_port_t port; // Port to print
   // Set pointer to address based on address family
+  std::ostringstream oss;
   switch (address->sa_family) {
   case AF_INET:
     numericAddress = &((struct sockaddr_in *) address)->sin_addr;
@@ -360,60 +364,34 @@ void PrintSocketAddress(const struct sockaddr *address, FILE *stream) {
     port = ntohs(((struct sockaddr_in6 *) address)->sin6_port);
     break;
   default:
-    fputs("[unknown type]", stream);    // Unhandled type
+    logger(ERROR, "[unknown type]", "", 0);    // Unhandled type
     return;
   }
   // Convert binary to printable address
   if (inet_ntop(address->sa_family, numericAddress, addrBuffer,
       sizeof(addrBuffer)) == NULL)
-    fputs("[invalid address]", stream); // Unable to convert
+    logger(ERROR, "[invalid address]", "", 0); // Unable to convert
   else {
-    fprintf(stream, "%s", addrBuffer);
+    oss << addrBuffer;
     if (port != 0)                // Zero not valid in any socket addr
-      fprintf(stream, "-%u", port);
+      oss << port;
+    logger(LOG, "Network address", oss.str(), 0);
   }
 }
 
-int web(int servSock) {
-    for (;;) { // Run forever
-        struct sockaddr_storage clntAddr; // Client address
-        // Set length of client address structure (in-out parameter)
-        socklen_t clntAddrLen = sizeof(clntAddr);
-
-        // Wait for a client to connect
-        int clntSock = accept(servSock, (struct sockaddr *) &clntAddr, &clntAddrLen);
-        if (clntSock < 0) {
-            logger(ERROR, "accept() failed", "unkown", 0);
-            exit(-1);
-        }
-
-        // clntSock is connected to a client!
-
-        fputs("Handling client ", stdout);
-        PrintSocketAddress((struct sockaddr *) &clntAddr, stdout);
-        fputc('\n', stdout);
-
-        // Create separate memory for client argument
-        struct ThreadArgs *threadArgs = (struct ThreadArgs *) malloc(
-            sizeof(struct ThreadArgs));
-        if (threadArgs == NULL) {
-            logger(ERROR, "malloc() failed", "", servSock);
-            exit(-1);
-        }
-        threadArgs->clntSock = clntSock;
-
-        // Create client thread
-        pthread_t threadID;
-        int returnValue = pthread_create(&threadID, NULL, ThreadMain, threadArgs);
-        if (returnValue != 0) {
-            logger(ERROR, "pthread_create() failed", strerror(returnValue), servSock);
-        }
-
-        std::ostringstream threadIDStr;
-        threadIDStr << threadID;
-        logger(LOG, "Handle Request with thread", threadIDStr.str(), 0);
-    }
-    // NOT REACHED
+void web(int clntSock, int hit) {
+  // Create separate memory for client argument
+  std::shared_ptr<ThreadArgs> threadArgs(new ThreadArgs);
+  if (threadArgs == nullptr) {
+    logger(ERROR, "new failed", "", clntSock);
+    exit(-1);
+  }
+  threadArgs->clntSock = clntSock;
+  threadArgs->hit = hit;
+  
+  // Create client thread
+  ThreadMain tm{threadArgs};
+  auto future = std::async(std::launch::async, &ThreadMain::main, &tm);
 }
 
 bool init_rest_data(const std::string& json_file) {
