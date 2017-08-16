@@ -49,7 +49,7 @@ int main(int argc, char **argv) {
     std::cout << "Rest api test data file was not set." << std::endl;
   }
 
-  int i, pid, listenfd, socketfd, hit;
+  int i, listenfd, socketfd, hit;
   socklen_t length;
   static struct sockaddr_in cli_addr; /* static = initialised to zeros */
   static struct sockaddr_in serv_addr; /* static = initialised to zeros */
@@ -101,7 +101,7 @@ int main(int argc, char **argv) {
   signal(SIGCLD, SIG_IGN); /* ignore child death */
   signal(SIGHUP, SIG_IGN); /* ignore terminal hangups */
   logger(LOG, "starting", "close open files", getpid());
-  for (i = 0;i<32;i++)
+  for (i = 0; i < 32; i++)
     close(i); /* close open files */
   setpgrp(); /* break away from process group */
   std::ostringstream portStr;
@@ -117,23 +117,16 @@ int main(int argc, char **argv) {
   serv_addr.sin_port = htons(port);
   if (bind(listenfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) <0)
     logger(ERROR, "system call", "bind", 0);
-  if ( listen(listenfd, 64) <0)
+  if ( listen(listenfd, 64) < 0)
     logger(ERROR, "system call", "listen", 0);
-  for (hit = 1; ;hit++) {
+  for (hit = 1; true ;hit++) {
     length = sizeof(cli_addr);
-    if ((socketfd = accept(listenfd, (struct sockaddr *)&cli_addr, &length)) < 0)
+    if ((socketfd = accept(listenfd,
+                           (struct sockaddr *)&cli_addr, &length)) < 0) {
       logger(ERROR, "system call", "accept", 0);
-    if ((pid = fork()) < 0) {
-      logger(ERROR, "system call", "fork", 0);
     }
     else {
-      if (pid == 0) { /* child */
-        close(listenfd);
-        web(socketfd, hit); /* never returns */
-      }
-      else { /* parent */
-        close(socketfd);
-      }
+      web(socketfd, hit); /* never returns */
     }
   }
 }

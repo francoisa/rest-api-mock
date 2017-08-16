@@ -11,6 +11,8 @@
 #include <map>
 #include <memory>
 #include <future>
+#include <chrono>
+#include <ctime>
 
 #include <boost/algorithm/string.hpp>
 #include <boost/lexical_cast.hpp>
@@ -55,8 +57,14 @@ void logger(int type, const std::string& s1, const std::string& s2, int
 socket_fd) {
    std::ofstream log;
    log.open("mock_rest_api.log", std::ofstream::app);
+   auto start = std::chrono::system_clock::now();
+   std::time_t start_time = std::chrono::system_clock::to_time_t(start);
    std::ostringstream resp;
-
+   char mbstr[100];
+   if (std::strftime(mbstr, 100, "%c", std::localtime(&start_time))) {
+     log << mbstr << ": ";
+   }
+   
    switch (type) {
    case ERROR: log << "ERROR: " << s1 << ": " << s2 << " Errno = "
                    << errno << " exiting pid =" << getpid() << std::endl;
@@ -200,16 +208,19 @@ void handle_get(char* buffer, std::map<const char*, std::string>& header,
        log << "HTTP/1.1 200 OK\nServer: mock_rest_api/" << VERSION << ".0\n"
            << "Content-Length: " << fsize << "\n"
            << "Connection: close\nContent-Type: " << fext << "\n\n";
-       logger(HEADER, "Resoponse Header", log.str(), hit);
+       logger(HEADER, "Response Header", log.str(), hit);
        write(fd, log.str().c_str(), log.str().size());
 
        /* send file in 8KB block - last block may be smaller */
        while (!file.eof()) {
          int ret = file.readsome(buffer, BUFSIZE);
-         write(fd, buffer, ret);
+         if (ret > 0) {
+           write(fd, buffer, ret);
+         }
+         else {
+           break;
+         }
        }
-       sleep(1); /* allow socket to drain before closing */
-       close(fd);
      }
    }
    else {
@@ -226,17 +237,21 @@ void handle_get(char* buffer, std::map<const char*, std::string>& header,
      log << "HTTP/1.1 200 OK\nServer: mock_rest_api/" << VERSION << ".0\n"
          << "Content-Length: " << fsize << "\n"
          << "Connection: close\nContent-Type: " << fext << "\n\n";
-     logger(HEADER, "Resoponse Header", log.str(), hit);
+     logger(HEADER, "Response Header", log.str(), hit);
      write(fd, log.str().c_str(), log.str().size());
 
      /* send file in 8KB block - last block may be smaller */
      while (!file.eof()) {
        int ret = file.readsome(buffer, BUFSIZE);
-       write(fd, buffer, ret);
+       if (ret > 0) {
+         write(fd, buffer, ret);
+       }
+       else {
+         break;
+       }
      }
-     sleep(1); /* allow socket to drain before closing */
-     close(fd);
    }
+   close(fd);
 }
 
 void handle_post(char* buffer, const std::map<const char*, std::string>& header,
@@ -267,40 +282,7 @@ void handle_post(char* buffer, const std::map<const char*, std::string>& header,
    if (fstr.empty()) {
      logger(FORBIDDEN, "file extension type not supported", buffer, fd);
    }
-   sleep(1); /* allow socket to drain before signalling the socket is closed */
    close(fd);
-}
-
-/* this is a child web server process, so we can exit on errors */
-void web_(int fd, int hit) {
-   long ret;
-   static char buffer[BUFSIZE+1]; /* static so zero filled */
-
-   ret = read(fd, buffer, BUFSIZE); /* read Web request in one go */
-   if (ret == 0 || ret == -1) { /* read failure stop now */
-     logger(FORBIDDEN, "failed to read browser request", "", fd);
-   }
-   if (ret > 0 && ret < BUFSIZE) { /* return code is valid chars */
-     buffer[ret] = 0; /* terminate the buffer */
-   }
-   else {
-     buffer[0] = 0;
-   }
-   logger(HEADER, "Request + Header", buffer, hit);
-   Method method = parse_method(buffer, fd);
-   std::map<const char*, std::string> header;
-   parse_headers(buffer, header);
-   switch (method) {
-   case Method::GET:
-     handle_get(buffer, header, fd, hit);
-     break;
-   case Method::POST:
-     handle_post(buffer, header, fd, hit);
-     break;
-   default:
-     logger(LOG, "Method", buffer, fd);
-   }
-   exit(1);
 }
 
 struct ThreadMain {
@@ -342,42 +324,10 @@ public:
     default:
       logger(LOG, "Method", buffer, fd);
     }
-    
+    logger(LOG, "ThreadMain.main()", "finished", hit);    
     return true;
   }
 };
-
-void PrintSocketAddress(const struct sockaddr *address) {
-  void *numericAddress; // Pointer to binary address
-  // Buffer to contain result (IPv6 sufficient to hold IPv4)
-  char addrBuffer[INET6_ADDRSTRLEN];
-  in_port_t port; // Port to print
-  // Set pointer to address based on address family
-  std::ostringstream oss;
-  switch (address->sa_family) {
-  case AF_INET:
-    numericAddress = &((struct sockaddr_in *) address)->sin_addr;
-    port = ntohs(((struct sockaddr_in *) address)->sin_port);
-    break;
-  case AF_INET6:
-    numericAddress = &((struct sockaddr_in6 *) address)->sin6_addr;
-    port = ntohs(((struct sockaddr_in6 *) address)->sin6_port);
-    break;
-  default:
-    logger(ERROR, "[unknown type]", "", 0);    // Unhandled type
-    return;
-  }
-  // Convert binary to printable address
-  if (inet_ntop(address->sa_family, numericAddress, addrBuffer,
-      sizeof(addrBuffer)) == NULL)
-    logger(ERROR, "[invalid address]", "", 0); // Unable to convert
-  else {
-    oss << addrBuffer;
-    if (port != 0)                // Zero not valid in any socket addr
-      oss << port;
-    logger(LOG, "Network address", oss.str(), 0);
-  }
-}
 
 void web(int clntSock, int hit) {
   // Create separate memory for client argument
@@ -392,6 +342,7 @@ void web(int clntSock, int hit) {
   // Create client thread
   ThreadMain tm{threadArgs};
   auto future = std::async(std::launch::async, &ThreadMain::main, &tm);
+  logger(LOG, "web()", "finished", hit);
 }
 
 bool init_rest_data(const std::string& json_file) {
