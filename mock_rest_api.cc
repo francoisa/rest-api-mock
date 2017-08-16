@@ -191,8 +191,18 @@ void handle_get(char* buffer, std::map<const char*, std::string>& header,
    if (fext.empty()) {
      std::string path{&buffer[4], strlen(&buffer[4])};
      const auto& td = rest_data.find(path);
-     if (td == rest_data.end()) {
+     if (td == rest_data.end() && path != "/getpid") {
        logger(NOTFOUND, "path not found", &buffer[5], fd);
+     }
+     else if (path == "/getpid") {
+       std::ostringstream pid;
+       pid << getpid();
+       std::ostringstream out;
+       out << "HTTP/1.1 200 OK\nServer: mock_rest_api/" << VERSION << ".0\n"
+           << "Content-Length: " << pid.str().size() << "\n"
+           << "Connection: close\nContent-Type: text/plain\n\n" << pid.str();
+       write(fd, out.str().c_str(), out.str().size());
+       logger(HEADER, "Response Header", out.str(), hit);
      }
      else {
        std::ifstream file;
