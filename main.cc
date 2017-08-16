@@ -15,6 +15,21 @@
 using namespace std;
 namespace po = boost::program_options;
 
+static int listenfd = -1;
+
+void terminate(int signum) {
+  if (signum == SIGTERM) {
+    if (listenfd > 0) {
+      std::ostringstream fd;
+      fd << "close socket: " << listenfd;
+      logger(LOG, "terminate", fd.str(), getpid());
+      close(listenfd);
+    }
+    logger(LOG, "terminate", "done", getpid());
+    exit(0);
+  }
+}
+
 int main(int argc, char **argv) {
   po::options_description desc("Allowed options");
   desc.add_options()
@@ -49,7 +64,7 @@ int main(int argc, char **argv) {
     std::cout << "Rest api test data file was not set." << std::endl;
   }
 
-  int i, listenfd, socketfd, hit;
+  int i, socketfd, hit;
   socklen_t length;
   static struct sockaddr_in cli_addr; /* static = initialised to zeros */
   static struct sockaddr_in serv_addr; /* static = initialised to zeros */
@@ -100,6 +115,7 @@ int main(int argc, char **argv) {
     return 0; /* parent returns OK to shell */
   signal(SIGCLD, SIG_IGN); /* ignore child death */
   signal(SIGHUP, SIG_IGN); /* ignore terminal hangups */
+  signal(SIGTERM, terminate);
   logger(LOG, "starting", "close open files", getpid());
   for (i = 0; i < 32; i++)
     close(i); /* close open files */
