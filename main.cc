@@ -142,6 +142,8 @@ int main(int argc, char **argv) {
       logger(ERROR, "system call", "accept", 0);
     }
     else {
+      std::cout << "Log file: " << data_dir << "/mock_rest_api.log"
+                << std::endl;
       web(socketfd, hit); /* never returns */
     }
   }
